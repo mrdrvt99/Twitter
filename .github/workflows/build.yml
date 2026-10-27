@@ -5,7 +5,7 @@ on:
     inputs:
       sdk_version:
         description: "iOS SDK Version"
-        default: "16.5"
+        default: "18.6"
         required: true
         type: string
       target_version:
@@ -66,21 +66,21 @@ jobs:
 
     steps:
       - name: Checkout Main
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: main
           ref: ${{ github.event.inputs.commit_id || github.ref }}
           submodules: recursive
 
       - name: Install Dependencies
-        run: brew install make dpkg ldid
+        run: brew install make dpkg ldid wget
 
       - name: Add GNU Make to PATH
         run: |
           echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
 
       - name: Download Theos
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: theos/theos
           ref: master
@@ -104,8 +104,8 @@ jobs:
       - name: Download iOS SDK
         if: steps.SDK.outputs.cache-hit != 'true'
         run: |
-          git clone -n --depth=1 --filter=tree:0 https://github.com/theos/sdks/
-          cd sdks
+          git clone -n --depth=1 --filter=tree:0 https://github.com/xybp888/iOS-SDKs/
+          cd xybp888/iOS-SDKs
           git sparse-checkout set --no-cone iPhoneOS${{ inputs.sdk_version }}.sdk
           git checkout
           mv ./*.sdk "${THEOS}/sdks"
@@ -205,4 +205,4 @@ jobs:
           tag_name: v${{ steps.tweak_info.outputs.version }}
           name: v${{ steps.tweak_info.outputs.version }} - ${{ steps.tweak_info.outputs.name }}
           files: main/packages/${{ steps.package_name.outputs.package }}
-          draft: true
+          draft: false
