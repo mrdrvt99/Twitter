@@ -177,7 +177,7 @@ jobs:
             main/deps/ffmpeg-kit-next/build
           key: ${{ needs.ffmpeg.outputs.cache-key }}
 
-     - name: Patch upstream TARGET
+      - name: Patch upstream TARGET
         run: |
           sed -i '' 's/iphone:clang:16.5:/iphone:clang:${{ inputs.sdk_version }}:/' \
             main/deps/zxPluginsInject/upstream/Makefile
