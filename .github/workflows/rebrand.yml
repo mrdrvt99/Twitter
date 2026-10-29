@@ -35,7 +35,7 @@ jobs:
 
     steps:
       - name: Checkout Main
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: main
           ref: ${{ github.event.inputs.commit_id || github.ref }}
