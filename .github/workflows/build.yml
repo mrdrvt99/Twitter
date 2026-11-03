@@ -33,16 +33,6 @@ on:
         default: ""
         required: false
         type: string
-      upload_artifact:
-        description: "Upload IPA as artifact (Public)"
-        default: true
-        required: false
-        type: boolean
-      create_release:
-        description: "Create a draft release (Private)"
-        default: false
-        required: false
-        type: boolean
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -194,7 +184,6 @@ jobs:
           echo "package=$(ls -t main/packages | head -n1)" >> "$GITHUB_OUTPUT"
 
       - name: Upload Artifact
-        if: inputs.upload_artifact == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.tweak_info.outputs.name }}_${{ steps.tweak_info.outputs.version }}_${{ matrix.deploy_format }}
@@ -205,7 +194,6 @@ jobs:
   release:
     name: Create Release
     needs: build
-    if: inputs.create_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
