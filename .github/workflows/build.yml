@@ -54,9 +54,6 @@ jobs:
     runs-on: macos-latest
     permissions:
       contents: write
-    outputs:
-      version: ${{ steps.tweak_info.outputs.version }}
-      name: ${{ steps.tweak_info.outputs.name }}
     strategy:
       fail-fast: false
       matrix:
@@ -197,7 +194,7 @@ jobs:
           echo "package=$(ls -t main/packages | head -n1)" >> "$GITHUB_OUTPUT"
 
       - name: Upload Artifact
-        if: ${{ inputs.upload_artifact }}
+        if: inputs.upload_artifact == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.tweak_info.outputs.name }}_${{ steps.tweak_info.outputs.version }}_${{ matrix.deploy_format }}
@@ -208,13 +205,27 @@ jobs:
   release:
     name: Create Release
     needs: build
-    if: ${{ inputs.create_release }}
+    if: inputs.create_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - name: Checkout Main
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.commit_id || github.ref }}
+          path: main
+
+      - name: Get Tweak Info
+        id: tweak_info
+        run: |
+          TWEAK_NAME=$(sed -n 's/^Name: *//p' main/control)
+          TWEAK_VERSION=$(awk '/Version:/ {print $2}' main/control)
+          echo "name=${TWEAK_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version=${TWEAK_VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           path: all-artifacts
 
@@ -223,7 +234,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v${{ needs.build.outputs.version }}
-          name: v${{ needs.build.outputs.version }} - ${{ needs.build.outputs.name }}
+          tag_name: v${{ steps.tweak_info.outputs.version }}
+          name: v${{ steps.tweak_info.outputs.version }} - ${{ steps.tweak_info.outputs.name }}
           files: all-artifacts/**/*
           draft: false
