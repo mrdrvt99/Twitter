@@ -41,7 +41,7 @@ concurrency:
 jobs:
   build:
     name: Build ${{ matrix.deploy_format }}
-    runs-on: macos-latest
+    runs-on: xcode-27
     permissions:
       contents: write
     strategy:
