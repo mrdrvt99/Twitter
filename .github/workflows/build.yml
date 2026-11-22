@@ -12,6 +12,7 @@ on:
         description: "Target iOS Version"
         default: "15.0"
         required: true
+        type: string
       decrypted_ipa_url:
         description: "Direct URL of an X IPA"
         default: ""
@@ -19,7 +20,7 @@ on:
         type: string
       twitter_branding:
         description: "Set app name to Twitter (IPA builds only)"
-        default: true
+        default: false
         required: false
         type: boolean
       resource_pack_url:
@@ -32,14 +33,14 @@ on:
         default: ""
         required: false
         type: string
-      upload_artifact:
-        description: "Upload packages as artifacts (Public)"
-        default: false
-        required: false
-        type: boolean
       create_release:
         description: "Create a published release (Public)"
         default: true
+        required: false
+        type: boolean
+      upload_artifact:
+        description: "Upload packages as artifacts (Public)"
+        default: false
         required: false
         type: boolean
 
@@ -60,7 +61,7 @@ jobs:
 
     steps:
       - name: Checkout Main
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: main
           ref: ${{ github.event.inputs.commit_id || github.ref }}
@@ -74,7 +75,7 @@ jobs:
           echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
 
       - name: Download Theos
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: theos/theos
           ref: master
@@ -185,6 +186,13 @@ jobs:
           IPA_EXT: ${{ matrix.deploy_format == 'trollstore' && 'tipa' || 'ipa' }}
           BRANDING: ${{ inputs.twitter_branding && 'Twitter' || 'X' }}
 
+      - name: Rename DEB to include format
+        if: matrix.deploy_format == 'rootfull' || matrix.deploy_format == 'rootless'
+        run: |
+          FILE=$(ls -t main/packages | head -n1)
+          mv "main/packages/${FILE}" \
+             "main/packages/${FILE%.deb}_${{ matrix.deploy_format }}.deb"
+
       - name: Pass package name
         id: package_name
         run: |
@@ -218,7 +226,7 @@ jobs:
 
     steps:
       - name: Checkout control file
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: main
           ref: ${{ github.event.inputs.commit_id || github.ref }}
