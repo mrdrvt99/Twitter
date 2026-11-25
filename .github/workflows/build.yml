@@ -12,24 +12,15 @@ on:
         description: "Target iOS Version"
         default: "15.0"
         required: true
+        type: string
       decrypted_ipa_url:
         description: "Direct URL of an X IPA"
         default: ""
         required: true
         type: string
-      deploy_format:
-        description: "Deployment format"
-        default: sideloaded
-        required: true
-        type: choice
-        options:
-          - rootfull
-          - sideloaded
-          - trollstore
-          - rootless
       twitter_branding:
         description: "Set app name to Twitter (IPA builds only)"
-        default: true
+        default: false
         required: false
         type: boolean
       resource_pack_url:
@@ -42,13 +33,13 @@ on:
         default: ""
         required: false
         type: string
-      upload_artifact:
-        description: "Upload IPA as artifact (Public)"
+      create_release:
+        description: "Create a published release (Public)"
         default: true
         required: false
         type: boolean
-      create_release:
-        description: "Create a draft release (Private)"
+      upload_artifact:
+        description: "Upload packages as artifacts (Public)"
         default: false
         required: false
         type: boolean
@@ -59,14 +50,18 @@ concurrency:
 
 jobs:
   build:
-    name: Build Tweak
-    runs-on: macos-latest
+    name: Build (${{ matrix.deploy_format }})
+    runs-on: xcode-27
     permissions:
-      contents: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        deploy_format: [rootfull, rootless, sideloaded, trollstore]
 
     steps:
       - name: Checkout Main
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: main
           ref: ${{ github.event.inputs.commit_id || github.ref }}
@@ -80,7 +75,7 @@ jobs:
           echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
 
       - name: Download Theos
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: theos/theos
           ref: master
@@ -88,38 +83,39 @@ jobs:
           submodules: recursive
 
       - name: Install cyan
-        if: inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'trollstore'
+        if: matrix.deploy_format == 'sideloaded' || matrix.deploy_format == 'trollstore'
         run: pip install https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
 
-      - name: Cache iOS 26.5 SDK
-        id: sdk-26
+      - name: iOS SDK Caching
+        id: SDK
         uses: actions/cache@v6
         with:
-          path: theos/sdks/iPhoneOS26.5.sdk
-          key: iOS-26.5-SDK-v2
+          path: theos/sdks/iPhoneOS${{ inputs.sdk_version }}.sdk
+          key: iOS-${{ inputs.sdk_version }}-SDK-v2
 
-      - name: Cache iOS 16.5 SDK
-        id: sdk-16
-        uses: actions/cache@v6
-        with:
-          path: theos/sdks/iPhoneOS16.5.sdk
-          key: iOS-16.5-SDK-v2
-
-      - name: Download missing iOS SDKs
-        if: steps.sdk-26.outputs.cache-hit != 'true' || steps.sdk-16.outputs.cache-hit != 'true'
+      - name: Download iOS SDK
+        if: steps.SDK.outputs.cache-hit != 'true'
         run: |
           git clone -n --depth=1 --filter=tree:0 https://github.com/xybp888/iOS-SDKs ios-sdks
           cd ios-sdks
-          git sparse-checkout set --no-cone iPhoneOS26.5.sdk iPhoneOS16.5.sdk
+          git sparse-checkout set --no-cone "iPhoneOS${SDK_VERSION}.sdk"
           git checkout
+          if [[ ! -d "iPhoneOS${SDK_VERSION}.sdk" ]]; then
+            echo "::error::iPhoneOS${SDK_VERSION}.sdk was not found in xybp888/iOS-SDKs"
+            exit 1
+          fi
           mkdir -p "${THEOS}/sdks"
-          for version in 26.5 16.5; do
-            if [[ ! -d "${THEOS}/sdks/iPhoneOS${version}.sdk" ]]; then
-              mv "iPhoneOS${version}.sdk" "${THEOS}/sdks/"
-            fi
-          done
+          mv "iPhoneOS${SDK_VERSION}.sdk" "${THEOS}/sdks/"
         env:
           THEOS: ${{ github.workspace }}/theos
+          SDK_VERSION: ${{ inputs.sdk_version }}
+
+      - name: Patch upstream TARGET
+        run: |
+          sed -i '' "s/iphone:clang:16\.5:/iphone:clang:${SDK_VERSION}:/" \
+            main/deps/zxPluginsInject/upstream/Makefile
+        env:
+          SDK_VERSION: ${{ inputs.sdk_version }}
 
       - name: Get Tweak Info
         id: tweak_info
@@ -131,7 +127,7 @@ jobs:
           echo "$TWEAK_NAME $TWEAK_VERSION"
 
       - name: Prepare X IPA
-        if: inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'trollstore'
+        if: matrix.deploy_format == 'sideloaded' || matrix.deploy_format == 'trollstore'
         id: x_version
         run: |
           wget "$IPA_URL" --no-verbose -O main/packages/com.atebits.Tweetie2.ipa
@@ -144,7 +140,7 @@ jobs:
           IPA_URL: ${{ inputs.decrypted_ipa_url }}
 
       - name: Prepare Image Pack
-        if: inputs.resource_pack_url != '' && (inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'trollstore')
+        if: inputs.resource_pack_url != '' && (matrix.deploy_format == 'sideloaded' || matrix.deploy_format == 'trollstore')
         run: |
           wget "$IMAGE_URL" --no-verbose -O main/resource-pack.zip
         env:
@@ -167,13 +163,13 @@ jobs:
         run: |
           cd ${{ github.workspace }}/main
           sed -i '' "s/^TARGET.*$/TARGET := iphone:clang:${{ inputs.sdk_version }}:${{ inputs.target_version }}/" Makefile
-          ./build.sh --${{ inputs.deploy_format }}
+          ./build.sh --${{ matrix.deploy_format }}
         env:
           THEOS: ${{ github.workspace }}/theos
           BUILD_DIR: ${{ github.workspace }}/ffmpeg-build
 
       - name: Rebrand IPA
-        if: (inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'trollstore') && (inputs.twitter_branding || inputs.resource_pack_url != '')
+        if: (matrix.deploy_format == 'sideloaded' || matrix.deploy_format == 'trollstore') && (inputs.twitter_branding || inputs.resource_pack_url != '')
         run: |
           cd ${{ github.workspace }}/main
           IMAGE_FLAG=""
@@ -182,13 +178,20 @@ jobs:
             "packages/$(ls -t packages | head -n1)"
 
       - name: Rename IPA to include IPA version
-        if: inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'trollstore'
+        if: matrix.deploy_format == 'sideloaded' || matrix.deploy_format == 'trollstore'
         run: |
           mv "main/packages/$(ls -t main/packages | head -n1)" \
-             "main/packages/${{ steps.tweak_info.outputs.name }}-${BRANDING}-${{ inputs.deploy_format }}_${{ steps.tweak_info.outputs.version }}_${{ steps.x_version.outputs.version }}.${IPA_EXT}"
+             "main/packages/${{ steps.tweak_info.outputs.name }}-${BRANDING}-${{ matrix.deploy_format }}_${{ steps.tweak_info.outputs.version }}_${{ steps.x_version.outputs.version }}.${IPA_EXT}"
         env:
-          IPA_EXT: ${{ inputs.deploy_format == 'trollstore' && 'tipa' || 'ipa' }}
+          IPA_EXT: ${{ matrix.deploy_format == 'trollstore' && 'tipa' || 'ipa' }}
           BRANDING: ${{ inputs.twitter_branding && 'Twitter' || 'X' }}
+
+      - name: Rename DEB to include format
+        if: matrix.deploy_format == 'rootfull' || matrix.deploy_format == 'rootless'
+        run: |
+          FILE=$(ls -t main/packages | head -n1)
+          mv "main/packages/${FILE}" \
+             "main/packages/${FILE%.deb}_${{ matrix.deploy_format }}.deb"
 
       - name: Pass package name
         id: package_name
@@ -199,19 +202,63 @@ jobs:
         if: ${{ inputs.upload_artifact }}
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.tweak_info.outputs.name }}_${{ steps.tweak_info.outputs.version }}
+          name: ${{ steps.tweak_info.outputs.name }}_${{ steps.tweak_info.outputs.version }}_${{ matrix.deploy_format }}
           path: ${{ github.workspace }}/main/packages/${{ steps.package_name.outputs.package }}
           archive: false
           if-no-files-found: error
 
-      - name: Create Draft Release
+      - name: Upload Release Staging Artifact
         if: ${{ inputs.create_release }}
-        id: create_release
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.deploy_format }}
+          path: ${{ github.workspace }}/main/packages/${{ steps.package_name.outputs.package }}
+          retention-days: 1
+          if-no-files-found: error
+
+  release:
+    name: Create Release
+    if: ${{ inputs.create_release }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout control file
+        uses: actions/checkout@v7
+        with:
+          path: main
+          ref: ${{ github.event.inputs.commit_id || github.ref }}
+          sparse-checkout: control
+          sparse-checkout-cone-mode: false
+
+      - name: Get Tweak Info
+        id: tweak_info
+        run: |
+          TWEAK_NAME=$(sed -n 's/^Name: *//p' main/control)
+          TWEAK_VERSION=$(awk '/Version:/ {print $2}' main/control)
+          echo "name=${TWEAK_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version=${TWEAK_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "$TWEAK_NAME $TWEAK_VERSION"
+
+      - name: Download all packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-files
+
+      - name: List release files
+        run: ls -la release-files
+
+      - name: Create Release
         uses: softprops/action-gh-release@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v${{ steps.tweak_info.outputs.version }}
           name: v${{ steps.tweak_info.outputs.version }} - ${{ steps.tweak_info.outputs.name }}
-          files: main/packages/${{ steps.package_name.outputs.package }}
-          draft: true
+          files: release-files/*
+          target_commitish: ${{ github.event.inputs.commit_id || github.sha }}
+          draft: false
